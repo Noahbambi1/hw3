@@ -1,0 +1,187 @@
+/*
+ * mm_alloc.c
+ *
+ * Stub implementations of the mm_* routines. Remove this comment and provide
+ * a summary of your allocator's design here.
+ */
+
+#include "mm_alloc.h"
+
+#include <stdlib.h>
+
+/* Your final implementation should comment out this macro. */
+#define MM_USE_STUBS
+
+s_block_ptr head = NULL;
+
+//finds or allocates new memory on the heap of the size requested, returns a void pointer that represents the beggining of the data requested
+void* mm_malloc(size_t size)
+{
+	s_block_ptr current_block;	
+	current_block = head;
+	s_block_ptr prev_block = NULL;	
+	
+	while(current_block != NULL)
+	{
+		if(current_block-> free = 1) //1 is true, 0 is false
+		{
+			//the case that the size of our current block has more than enough space then that was requested, we will attempt to split the data
+			if(current_block->size > size)
+			{
+				//we now try split the block to take the extra memory and place it in a new block
+				split_block(current_block, size); //splits the block so that extra memory is given to a new block placed at the end of the list (if the threshold of extra memory is passed)
+				current_block->free = 0; //the block is set to no longer free
+				return current_block->data; //return the array pointer that is now the beggining of the data
+			}
+			//the case that the size of the block we are looking at is the exact size we want
+			else if(current_block->size == size)
+			{
+				current_block->free = 0; //it is set to no longer free
+				return current_block->data; //return the array pointer that is now the beggining of the data
+			}
+		}
+		prev_block = current_block;
+		current_block = current_block->next;
+	}
+	// if we reach the end of the while and there has been so return, it means we have to extend our break, ie the mapped area, allowing for new heap memory to be used. the uses sbrk
+	current_block = extend_heap(prev_block, size); //gives the function the previous block, returns a pointer to that new block with size memory requested and makes it point to the previous block
+	current_block->free = 0; //set to not free
+		
+	if (head==NULL){	//the case that this is the first time malloc has been called in the program
+		head=current_block; //sets the head to be the first block
+	}
+	else prev_block->next = current_block; //sets the block at the very end to point to the new block
+	return current_block->data;	
+}
+
+/* Add a new block at the of heap,
+ * return NULL if things go wrong
+ */
+s_block_ptr extend_heap (s_block_ptr last , size_t s)
+{	
+	s_block_ptr new_block; //creates a new block
+	if((new_block = (s_block_ptr) sbrk(s + BLOCK_SIZE)) != (void*)-1)//this checks that there are no errors moving the break further along in the heap (ie the heap isnt full or something like that)
+	{
+		//sets all the constructer properties
+		new_block->size = s; //sets the size to the given size
+		new_block->next = NULL; //sets the next to null
+		new_block->prev = last; //previous to the block at the end of the list
+		new_block->free = 1; // sets free to true
+		new_block->ptr = new_block; // sets its pointer to itself
+		return new_block;
+	}
+	else //if there was an error, it will return null so that no block can be made and no memory can be tampered with outside the boundries of the program.
+	{
+		return NULL;
+	}	
+}
+
+/* Split block according to size, b must exist */
+void split_block (s_block_ptr b, size_t s){
+	if(b != NULL && b->size > s + BLOCK_SIZE + sizeof(char)){ //if the size of the block being looked at is bigger than the requested block size, by more than the size it takes to store the block data 
+													// and the size of the new data, then we create a new block that can be used later with the left over memory
+		//creates a new block
+		s_block_ptr new_block = (s_block_ptr) b->data + s;
+		new_block->size = b->size - BLOCK_SIZE - s; // allocates the new block to have a size of the old block minus the size of the data used in the previous block and the size of general block data
+				
+		new_block->next = b->next; // sets the next pointer of the new block to where the head is pointing
+		if (b->next != NULL)
+		{
+			b->next->prev = new_block; //the old second block in the list now points to the new block
+		}		
+		b->next = new_block; // the head points to the new block
+		new_block->prev = b; //sets the prev pointer to the head, so it is now the second member of the list	
+		new_block->free = 1;// sets the block to be free for use
+		new_block->ptr = new_block;
+		b->size = s; //sets the size of the other split block to what was needed		
+	}
+}
+
+void* mm_realloc(void* ptr, size_t size)
+{
+	s_block_ptr old_block = get_block(ptr);//fetch the block at the given pointer
+	if (old_block == NULL) // if the fetch returned null, retrun null
+	{
+		return NULL;
+	}
+	void * new = mm_malloc(size); // allocate new memory of new size
+	memcpy(new,old_block->data,old_block->size); // copy the data over to the new memory
+	old_block->free = 1; //set the old block to free
+	fusion(old_block); //check if the old block can be fused with its neighbours
+	
+	return (void*) ptr;
+	
+}
+
+void mm_free(void* ptr)
+{
+	s_block_ptr block_to_free = get_block(ptr);
+	if (block_to_free!= NULL){ //fetches block at the adress given and checks the block actually exists
+		block_to_free->free = 1; //sets the block to free
+		fusion(block_to_free); //attempts to fuse block with neighbouring blocks
+	}
+}
+
+/* Get the block from addr */
+s_block_ptr get_block (void *p)
+{
+	if (p==NULL)//just checking we didn't receive a NULL pointer
+	{
+		return NULL;
+	}
+	s_block_ptr current_block;	
+	current_block = head;
+	while (current_block!=NULL) //traverse the list
+	{
+		if(current_block->data == p)//if true then the block matching the data has been found
+		{
+			return current_block; 
+		}
+		current_block = current_block->next;
+	}
+	return NULL; //if it reaches here then p was not found in the list
+}
+
+/* Try fusing block with neighbors */
+s_block_ptr fusion(s_block_ptr b)
+{
+	if (b != NULL && b->free == 1) // check that b exists and it is free
+	{	
+		if (b->next != NULL && b->next->free == 1)
+		{
+			b->size = b->size + BLOCK_SIZE + b->next->size; //resize b so that it is as big as itself plus the block size plus the size of its neighbour
+			b->next = b->next->next; //move pointers around such that b->next merges with b
+			if (b->next !=NULL)
+			{
+				b->next->prev = b;
+			}	
+			if (b->prev !=NULL && b->prev->free == 1) // check that left exists and it is free
+			{
+				b->prev->size = b->size + BLOCK_SIZE + b->prev->size;	//resize b so that it is as big as itself plus the block size plus the size of its neighbour
+				b->prev->next = b->next;
+				if (b->next != NULL && b->next->prev != NULL)
+				{
+					b->next->prev = b->prev;			
+				}
+				b = b->prev;
+			}
+		}		
+	}
+	return b;
+}
+
+//print the blocks
+void print_blocks();
+{
+	
+}
+
+
+
+
+
+
+
+
+
+
